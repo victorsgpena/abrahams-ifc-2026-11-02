@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BIM IFC Viewer | Steel Frame & Hebel Layout</title>
+    <link rel="stylesheet" href="app.css">
+    
+    <!-- Local 3D Libraries & Utilities -->
+    <script src="lib/three.min.js"></script>
+    <script src="lib/OrbitControls.js"></script>
+    <script src="lib/TransformControls.js"></script>
+    <script src="lib/xlsx.full.min.js"></script>
+</head>
+<body>
+
+    <!-- ── TOP HEADER BAR ── -->
+    <header class="top-header">
+        <div class="brand">
+            <span class="brand-icon">🏗️</span>
+            <div>
+                <div class="brand-title">BIM FRAME VIEWER</div>
+                <div class="brand-subtitle">Steel Framing • Tophats • Hebel Panels</div>
+            </div>
+        </div>
+
+        <div class="header-actions">
+            <!-- IFC File Upload -->
+            <input type="file" id="ifc-file-input" accept=".ifc" style="display: none;">
+            <button id="btn-open-ifc" class="btn btn-primary" title="Load Steel Frame IFC file">
+                📂 Open IFC
+            </button>
+            <button id="btn-load-sample" class="btn" title="Load sample model PSF760">
+                🧪 Sample PSF760
+            </button>
+
+            <!-- Project (Save / Load JSON) -->
+            <input type="file" id="json-project-input" accept=".json" style="display: none;">
+            <button id="btn-save-project" class="btn" title="Save project state to JSON">
+                💾 Save JSON
+            </button>
+            <button id="btn-load-project" class="btn" title="Load previously saved project">
+                📥 Load JSON
+            </button>
+
+            <!-- BOM Exports -->
+            <button id="btn-export-excel" class="btn btn-success" title="Download Bill of Materials as Excel (.xlsx)">
+                📊 Export Excel
+            </button>
+            <button id="btn-print-report" class="btn" title="Print / Save as PDF">
+                🖨️ Print / PDF
+            </button>
+        </div>
+    </header>
+
+    <!-- ── MAIN CONTAINER ── -->
+    <main class="app-container">
+
+        <!-- ── LEFT PANEL: 3D BLOCK GALLERY ── -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span>3D Block Gallery</span>
+                <span id="active-category-badge" class="badge badge-blue">Hebel 75mm</span>
+            </div>
+
+            <!-- Category Tabs -->
+            <div class="tabs-container">
+                <button class="tab-btn active" data-category="hebel_75">Hebel 75mm</button>
+                <button class="tab-btn" data-category="hebel_50">Hebel 50mm</button>
+                <button class="tab-btn" data-category="tophats">Tophats</button>
+            </div>
+
+            <!-- Catalog Component List -->
+            <div class="catalog-list" id="catalog-list-container">
+                <!-- Populated dynamically via block-catalog.js -->
+            </div>
+        </aside>
+
+        <!-- ── CENTER AREA: 3D VIEWPORT ── -->
+        <section class="viewport-container" id="viewport-container">
+            <canvas id="three-canvas"></canvas>
+
+            <!-- Floating Shortcuts HUD -->
+            <div class="viewport-overlay">
+                <div class="hud-pill">
+                    <span>💡 <b>Shortcuts:</b></span>
+                    <span><kbd>Middle Drag</kbd> Pan</span>
+                    <span><kbd>Click</kbd> Draw Polyline</span>
+                    <span><kbd>Enter</kbd> Create Panels</span>
+                    <span><kbd>F</kbd> Flip Side</span>
+                    <span><kbd>R</kbd><kbd>E</kbd><kbd>T</kbd> Rotate 90°</span>
+                    <span><kbd>M</kbd> Measure</span>
+                    <span><kbd>Esc</kbd> Cancel</span>
+                </div>
+                <div class="hud-pill" id="hud-model-info" style="display: none;">
+                    <span>📁 <b id="hud-model-name">Model: -</b></span>
+                </div>
+            </div>
+
+            <!-- Bottom Floating Viewport Toolbar -->
+            <div class="viewport-tools">
+                <button id="btn-placement-mode" class="btn btn-sm btn-primary" title="Toggle between continuous Polyline placement and Single block placement">〰️ Mode: Polyline</button>
+                <button id="btn-finish-polyline" class="btn btn-sm btn-success" style="display: none;" title="Confirm and create panels along the polyline [Enter]">✅ Create Panels [Enter]</button>
+                <button id="btn-view-iso" class="btn btn-sm" title="Isometric View">Isometric</button>
+                <button id="btn-view-front" class="btn btn-sm" title="Front View">Front</button>
+                <button id="btn-view-top" class="btn btn-sm" title="Top / Plan View">Top</button>
+                <button id="btn-toggle-ifc" class="btn btn-sm" title="Show / Hide steel frame structure">👁️ IFC On/Off</button>
+                <button id="btn-toggle-floor-grid" class="btn btn-sm" title="Show / Hide Floor Grid">🌐 Grid: On</button>
+                <button id="btn-toggle-exterior" class="btn btn-sm" title="Force panels to face outward from the building">🏠 Exterior: Off</button>
+                <button id="btn-toggle-edge-snap" class="btn btn-sm btn-primary" title="Snap to corners (red) and edges (cyan) of the structure">📐 Edge Snap: On</button>
+                <button id="btn-toggle-grid" class="btn btn-sm" title="Toggle 50mm Grid Snap">🧲 Snap: 50mm</button>
+                <button id="btn-measure-tool" class="btn btn-sm" title="Point-to-Point Measurement Tool [Key M]">📏 Measure [M]</button>
+                <button id="btn-clear-measures" class="btn btn-sm" title="Clear all measurement dimensions" style="display: none;">🧹 Clear Dims</button>
+                <button id="btn-clear-blocks" class="btn btn-sm btn-danger" title="Delete all placed blocks">🗑️ Clear Blocks</button>
+            </div>
+        </section>
+
+        <!-- ── RIGHT PANEL: INSPECTOR & LIVE BOM ── -->
+        <aside class="inspector">
+            <!-- Global Metrics Summary -->
+            <div class="bom-summary-box">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary);">Live Quantity Takeoff (BOM)</span>
+                    <span id="bom-total-units" class="badge badge-blue">0 Blocks</span>
+                </div>
+
+                <div class="bom-metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-val" id="metric-area">0.00 <span style="font-size: 12px;">m²</span></div>
+                        <div class="metric-label">Total Hebel Area</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val" id="metric-length">0.00 <span style="font-size: 12px;">m</span></div>
+                        <div class="metric-label">Tophat Length</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val" id="metric-weight">0.0 <span style="font-size: 12px;">kg</span></div>
+                        <div class="metric-label">Est. Weight</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-val" id="metric-types">0</div>
+                        <div class="metric-label">Distinct Types</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Materials Table -->
+            <div class="bom-table-container">
+                <table class="bom-table">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th style="text-align: center;">Qty</th>
+                            <th style="text-align: right;">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bom-table-body">
+                        <tr>
+                            <td colspan="3" style="text-align: center; color: var(--text-secondary); padding: 20px;">
+                                No blocks placed yet.<br>
+                                Select a panel from the gallery and click on the wall.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Selection Inspector -->
+            <div class="selection-box" id="selection-inspector">
+                <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px;">
+                    Block Properties
+                </div>
+                <div id="inspector-content">
+                    <p style="font-size: 11px; color: var(--text-secondary);">No block selected.</p>
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- ── LOADING PROGRESS MODAL ── -->
+    <div class="modal-overlay" id="loading-modal">
+        <div class="modal-content">
+            <h3 style="font-size: 16px; margin-bottom: 8px;" id="modal-title">Loading IFC Model...</h3>
+            <p style="font-size: 12px; color: var(--text-secondary);" id="modal-subtitle">Processing steel structure in WebAssembly</p>
+            <div class="progress-bar-container">
+                <div class="progress-fill" id="modal-progress-fill"></div>
+            </div>
+            <span style="font-size: 11px; color: var(--text-secondary);" id="modal-percent">0%</span>
+        </div>
+    </div>
+
+    <!-- Main Script (ES Module) -->
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
